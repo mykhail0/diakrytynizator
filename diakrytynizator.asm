@@ -11,9 +11,9 @@ ranges dd 0x0, 0x7F, 0x80, 0x7FF, 0x800, 0xFFFF, 0x10000, 0x10FFFF
 
 SYS_READ equ 0
 SYS_WRITE equ 1
-SYS_EXIT  equ 60
+SYS_EXIT equ 60
 STDIN equ 0
-STDOUT    equ 1
+STDOUT equ 1
 
 INBUFSZ equ 4000
 OUTBUFSZ equ 4000
@@ -36,54 +36,72 @@ _start:
   pop r8 ; Pop the number of arguments.
   pop r9 ; Pop args[0]
   dec r8
-  push r8 ; first number on the stack represents the number of coeffs of the polynomial
+  ; First number on the stack represents the number of coeffs of the polynomial.
+  push r8
   jmp loop
 push_coef_on_stack:
   mov qword [r11], rax
   xor eax, eax
 loop:
   add r11, 8
-  mov rsi, [r11] ; adres kolejnego argumentu
+  mov rsi, [r11] ; The next argument's address.
   test rsi, rsi
-  jz next_uni ; napotkano zerowy wskaźnik, nie ma więcej argumentów
-; Pętla wczytująca napis-liczbę modulo MOD,
-; wynik zapisuje w rejestrze A, (mieście się w eax).
+  jz next_uni ; Null pointer met, no more parameters.
+; Loop for reading a string-number modulo MOD,
+; answer is written to the A register, (fits in the eax).
 str_to_dec:
-  ; Wczytujemy kolejny znak i sprawdzamy czy nie jest NULL'em.
+  ; Reads the next character, checks if it's NULL.
   mov cl, byte [rsi]
   test cl, cl
-  ; Wrzucamy sparsowany wynik na stos.
+  ; If is NULL, time to push rax to the stack.
   jz push_coef_on_stack
-  ; Sprawdzamy czy znak jest cyfrą,
-  ; wpp przerywamy działanie programu.
+  ; Check if the character is a digit.
+  ; Otherwise program is terminated with error exitcode.
   cmp cl, 47 ; '0' - 1
   jle error
   cmp cl, 58 ; '9' + 1
   jge error
-  ; Mnożymy dotychaczas sparsowaną liczbę przez 10,
-  ; dodajemy wartość nowego znaku.
+  ; Multiplies already parsed value by 10,
+  ; adds new character to the value,
+  ; takes modulo.
   mov ebx, 10
   mul ebx
   add eax, ecx
   sub eax, ZERO_ASCII
   call modulo
-  ; Robimy kolejną iterację.
+  ; Next iteration.
   inc rsi
   jmp str_to_dec
 
+; Normal version.
+; rax %= MOD
+;modulo:
+  ;mov ecx, MOD
+  ;div rcx
+  ;mov eax, edx
+  ;xor edx, edx
+  ;xor ecx, ecx
+  ;ret
+
+; Optimized gcc -O3 version of the following code.
+; uint32_t f(uint64_t x) { return x % 0x10FF80; }
 ; rax %= MOD
 modulo:
-  mov ecx, MOD
-  div rcx
-  mov eax, edx
+  mov rcx, rax
+  mov rdx, 0x787c03a5c11c4499
+  mul rdx
+  shr rdx, 0x13
+  imul rdx, rdx, 0x10ff80
+  sub rcx, rdx
+  mov eax, ecx
   xor edx, edx
   xor ecx, ecx
   ret
 
-; Wylicza wartość wielomianu na stosie dla x pod rdx.
-; Wielomian jest przechowywany w następujący sposób:
-; pod rdi na stosie jest najwyższa potęga + 1, czyli n + 1
-; dalej  jest [rdi] współczynników w kolejnosci a0 a1 .. an
+; Computes the value of the polynomial on the stack for x equal rdx.
+; The polynomial is saved in the following way:
+; rdi is the address on stack, which has the number of coefficients of the polynomial.
+; Next are [rdi] coefficients in the order of a0 a1 .. an.
 calculate:
   xor eax, eax
   mov r11, [rdi]
@@ -99,6 +117,10 @@ mult_nd_add:
 calculated:
   ret
 
+; Reads bytes for the unicode value.
+; Decodes them into the unicode value and saves it at ebx.
+; Next computes polynomial value for the value, and writes encoding bytes
+; to the outArr, printing if needed.
 next_uni:
   cmp r13, r15
   ; Refresh buffer if needed.
@@ -154,7 +176,7 @@ three_or_four:
   cmp bl, 0xF7
   ja error
   mov r12, 4
-  sub bl, 0xF0
+  sub bl, 0xF0 ; take only meaningful encoding bits
   jmp nr_known
 
 one:
@@ -162,7 +184,7 @@ one:
   jmp nr_known
 three:
   mov r12, 3
-  sub bl, 0xE0
+  sub bl, 0xE0 ; take only meaningful encoding bits
 
 ; if one portion left, special treatment
 
@@ -316,11 +338,11 @@ print:
 error:
   call print
   mov eax, SYS_EXIT
-  mov edi, 1 ; kod powrotu 1
+  mov edi, 1
   syscall
 
 exit:
   call print
-  mov     eax, SYS_EXIT
-  xor     edi, edi        ; kod powrotu 0
+  mov eax, SYS_EXIT
+  xor edi, edi
   syscall
